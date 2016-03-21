@@ -13,7 +13,6 @@
 
 
 
-if (!require(Rtools)) install.packages('Rtools')
 if (!require(devtools)) install.packages('devtools')
 if (!require(httr)) install.packages('httr')
 if (!require(grid)) install.packages('grid')
@@ -55,15 +54,38 @@ phantomjsUserAgent <- "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (K
 # starting phantom server driver
 #pJS <- phantom(pjs_cmd = phantomjsdir, extras = pjsextr)
 
-RSelenium::startServer(invisible = FALSE, log = TRUE)
+ie_driver_path <- paste0(mywd,"/","IEDriverServer.exe")
+operapath <- ""
+chromepath <- ""
+iepath <- paste('-Dwebdriver.ie.driver=',ie_driver_path,sep='')
+browserargs <- c(chromepath,operapath,iepath)
+
+RSelenium::startServer(args = browserargs, invisible = FALSE, log = FALSE)
 Sys.sleep(3)
+
 #remDr <- remoteDriver(browserName = "phantomjs", extraCapabilities = eCap)
 #remDr$open()
 #remDr$value$message # in case of errors run this line for debugging
 
+
+##
+##  --------------    Running Firefox   ---------------------
+##
+
 firefoxbinarypath = list("firefox.binary" = "'C:/Program Files (x86)/Mozilla Firefox/firefox.exe'")
 remDr <- remoteDriver(browserName = "firefox", extraCapabilities = firefoxbinarypath)
-remDr$open()
+
+
+##
+##  --------------    Running Explorer   ---------------------
+##
+# explorerbinarypath = list("explorer.binary" = "'C:/Program Files/Internet Explorer/iexplore.exe'")
+# remDr <- remoteDriver(browserName = "internet explorer", extraCapabilities = explorerbinarypath)
+
+remDr$open(silent = FALSE)
+remDr$value$message
+
+remDr$navigate("http://www.google.com")
 
 
 as.character.factor <- function(x) {as.character(levels(x))[x]}
@@ -79,10 +101,10 @@ mywords <- c(dt[,1])
 
 
 dt <- read.xlsx2("Mazda_data.xlsx", "Regions", colClasses = c('character'))
-dt <- dt[,1:2]
+dt <- dt[,c(1,3)]
 dt[,1] <- as.character.factor(dt[,1])
-dt[,2] <- as.numeric.factor(dt[,2])
-dt_regions <- dt[!is.na(dt[,2]),]
+dt[,2] <- as.character.factor(dt[,2])
+dt_regions <- dt[!(dt[,2]==""),]
 regions <- c(dt_regions[,2])
 
 
@@ -122,17 +144,20 @@ for (region_id in regions){
     
       ss.word <- word
       
-      region_id <- 
+      #ss.word <- "mazda 6"
+      #region_id <- "&ip=0.0.0.0&tci=p:30000,g:1011853&uule=w+CAIQIFISCavuLsfood1CEQO1h43vu-ew"
+      
+      
       ss.se <- "google"
       
-      
       region_text <- dt_regions[dt_regions[,2]==region_id,1]
+      ss.word_adj <- paste0 (ss.word," ",region_text)
       remDr$navigate("http://google.com")
       
       #' remDr$screenshot(display = TRUE)
       #' 
       webElem <- remDr$findElement(using = "class", "gsfi")
-      webElem$sendKeysToElement(list(enc2utf8(ss.word),key = "enter"))
+      webElem$sendKeysToElement(list(enc2utf8(ss.word_adj),key = "enter"))
       ## webElem$sendKeysToElement(list(enc2utf8(ss.word)))
       Sys.sleep(0.5)
     
@@ -148,9 +173,13 @@ for (region_id in regions){
         print (remDr$executeScript("return document.readyState;"))
       } 
       
+      curent_url <- remDr$getCurrentUrl()[[1]]
+      curent_url <- paste0(curent_url,region_id)
+      remDr$navigate(curent_url)
+      
       print(paste0("page loaded: ",ss.word))
     
-      ss.screenshotfull.file <- paste0(folderss,ss.word,".png")
+      ss.screenshotfull.file <- paste0(folderss,ss.se,"_",ss.word,"_",region_text,".png")
       remDr$screenshot(display = F, file = ss.screenshotfull.file)
       
       print(paste0("screenshot saved: ",ss.word))
@@ -166,42 +195,61 @@ for (region_id in regions){
       ## print(paste0("page source loaded: ",ss.word))
       
       #' reading all organic search elements from page
-      elem.snippet <- remDr$findElements(using="class name",value = "rc")
+       
+      Sys.sleep(2)
+      elem.snippet <- remDr$findElements(using="class",value = "ads-ad")
       
       for (i in 1:length(elem.snippet)) {
       
-        
+        #i <- 1
         print(paste0("element opened: ",ss.word,"  pos",i))
         
         ss.pos <- i
+
+        elem.snippet <- remDr$findElements(using="class",value = "ads-ad")
+        if(length(elem.snippet)<i) break   # handling google autorefresh
         ss.snippet.code  <- elem.snippet[[i]]$getElementAttribute('innerHTML')
+    
           
-        #' reading title & link
-        elemtitle <- elem.snippet[[i]]$findChildElement(using = "class name", value = "r")
         
+        
+        #' reading title & link
+        # vs3p1c0   vs0p3c0   vs0p2c0
+        m <- regexec ('id=\"s0p.c0\">.*>(.*?)</a></h3', ss.snippet.code[[1]])
+        ss.title <- regmatches(ss.snippet.code[[1]], m)[[1]][2]
         print(paste0("element title ok"))
         
         
-        elemcode <- elemtitle$getElementAttribute('innerHTML')
         
-        print(paste0("element innerHTML ok"))
+        elem.snippet <- remDr$findElements(using="class",value = "ads-ad")  ## For solving DOM failed issue
+        if(length(elem.snippet)<i) break   # handling google autorefresh
+        elemcode <- elem.snippet[[i]]$findChildElement(using = "class", value = "ads-visurl")
+        elemcode <- elemcode$getElementAttribute('innerHTML')     
+        elemcode <- gsub ('</?b>',"", elemcode)
         
-        m <- regexec ('href=/"(.*?)/"', elemcode[[1]])
-        ss.full.link <- regmatches(elemcode[[1]], m)[[1]][2]
-        m <- regexec ('://(.*?)/', ss.full.link)
-        ss.short.link <- regmatches(ss.full.link, m)[[1]][2]
+        m <- regexec ('<cite>(.*?)<', elemcode[[1]])
+        ss.full.link  <- regmatches(elemcode[[1]], m)[[1]][2]
+        ss.short.link <- ss.full.link
+        print(paste0("element Link ok"))
         
-        elemtext <- elem.snippet[[i]]$findChildElement(using = "class name", value = "st")
+        
+        
+        elemtext <- elem.snippet[[i]]$findChildElement(using = "class", value = "ads-creative")
         ss.text <- elemtext$getElementText()[[1]]
+        print(paste0("element text loaded: ",ss.word,"  pos",i))
         
-       
-        print(paste0("element loaded: ",ss.word,"  pos",i))
-        
-        ss.screenshotpos.file <- paste0(foldersspos,ss.word," pos_",i,".png")
+        ss.screenshotpos.file <- paste0(foldersspos,ss.se,"_",region_text,"_",ss.word," pos_",i,".png")
         
         elemloc <- elem.snippet[[i]]$getElementLocation()
         elemsize <- elem.snippet[[i]]$getElementSize()
-        imgshort <- img[elemloc$y:(elemloc$y+elemsize$height),elemloc$x:(elemloc$x+elemsize$width),]
+        
+        
+        tryCatch(
+          { imgshort <- img[elemloc$y:(elemloc$y+elemsize$height),elemloc$x:(elemloc$x+elemsize$width),]},
+            error = function(cond) {imgshort <<- img[0:2,0:2,]})
+      
+        
+        
         writePNG(imgshort, target=ss.screenshotpos.file)
         rm (imgshort)
         
@@ -209,8 +257,14 @@ for (region_id in regions){
         
         #' print(c(ss.word, ss.se,ss.screenshotfull.file, ss.screenshotpos.file, ss.pos,ss.full.link, ss.short.link, ss.text,  ss.snippet.code))
         #' 
-        newrow <- c(ss.word, ss.se,ss.screenshotfull.file, ss.screenshotpos.file, ss.pos, ss.short.link, ss.full.link, ss.text,  ss.snippet.code,"","")
+        #' 
         
+        ss.code <- as.character(ss.snippet.code[[1]][1])
+        #ss.code <- "sdfsd"
+
+        newrow <- c(ss.word, ss.se, region_text, ss.screenshotfull.file, ss.screenshotpos.file, "ad", ss.pos, ss.short.link, ss.full.link, ss.title, ss.text, ss.code,"","")
+
+                
         datacollected[nrow(datacollected)+1,] <- newrow
     
         
@@ -246,20 +300,20 @@ writeWorksheet(wb, datacollected,"Sheet1", startRow = 1, startCol = 1, header = 
 #' collect the data
 #' 
 for (i in 1:ncol(datacollected)) setColumnWidth (wb,"Sheet1",i,9000)
-for (i in c(1,2,5)) setColumnWidth (wb,"Sheet1",i,3000)
+for (i in c(1,2,3,4,6,7)) setColumnWidth (wb,"Sheet1",i,3000)
 for (i in 2:(1+nrow(datacollected))) setRowHeight (wb,"Sheet1",i,50)
 
 
 #' insert hyperlinks
 #' 
-for (i in 2:(nrow(datacollected)+1)) setCellFormula(wb,"Sheet1",i,3,paste0('HYPERLINK("',datacollected[i-1,3],'","link")'))
 for (i in 2:(nrow(datacollected)+1)) setCellFormula(wb,"Sheet1",i,4,paste0('HYPERLINK("',datacollected[i-1,4],'","link")'))
+for (i in 2:(nrow(datacollected)+1)) setCellFormula(wb,"Sheet1",i,5,paste0('HYPERLINK("',datacollected[i-1,5],'","link")'))
 
 for (i in 1:(nrow(datacollected))){
 createName(wb, name = paste0("graph",i),
-            formula = paste("Sheet1", idx2cref(c(i+1, 4)), sep = "!"), overwrite = TRUE)
+            formula = paste("Sheet1", idx2cref(c(i+1, 5)), sep = "!"), overwrite = TRUE)
 
-addImage(wb, filename = datacollected[i,4], name = paste0("graph",i),
+addImage(wb, filename = datacollected[i,5], name = paste0("graph",i),
           originalSize = FALSE)
 }
 
